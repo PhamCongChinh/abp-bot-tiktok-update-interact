@@ -59,80 +59,46 @@ func main() {
 	}()
 
 	// --- PostgreSQL: tbl_posts lookup ------------------------------------------
-	// Fetch URLs of posts already recorded for ORG_ID/PUB_TIME. Non-fatal on
-	// failure — this lookup does not gate the crawl loop below.
+	// Fetch URLs of posts already recorded for ORG_ID/PUB_TIME. This is the
+	// bot's sole source of crawl targets (no more keyword search), so a
+	// failure here is fatal.
 	dbCtx, dbCancel := context.WithTimeout(ctx, 30*time.Second)
 	defer dbCancel()
 
 	pg, err := database.NewPostgresDB(dbCtx, cfg.PostgresDSN,
 		int32(cfg.PostgresMaxPoolSize), int32(cfg.PostgresMinPoolSize), log)
 	if err != nil {
-		log.Error("Failed to connect PostgreSQL — skipping tbl_posts lookup", zap.Error(err))
-	} else {
-		defer pg.Close()
-
-		postRepo := repository.NewPostRepository(pg.Pool(), log)
-		postURLs, err := postRepo.FindURLsByOrgAndPubTime(dbCtx, cfg.OrgID, cfg.PubTimeAfter)
-		if err != nil {
-			log.Error("Failed to query tbl_posts", zap.Error(err))
-		} else {
-			log.Info("tbl_posts lookup complete",
-				zap.Int("orgID", cfg.OrgID),
-				zap.Int64("pubTimeAfter", cfg.PubTimeAfter),
-				zap.Int("count", len(postURLs)),
-			)
-			for i, url := range postURLs {
-				log.Info("tbl_posts url", zap.Int("index", i+1), zap.String("url", url))
-			}
-		}
+		log.Fatal("Failed to connect PostgreSQL", zap.Error(err))
 	}
+	defer pg.Close()
 
-	// --- PostgreSQL keyword lookup (disabled for local dev) -------------------
-	// keywordRepo := repository.NewKeywordRepository(pg.Pool(), log)
-	//
-	// // Load keywords from PostgreSQL
-	// keywords, err := keywordRepo.FindActive()
-	// if err != nil {
-	// 	log.Fatal("Failed to load keywords from PostgreSQL", zap.Error(err))
-	// }
-	// ---------------------------------------------------------------------------
-
-	// Load keywords from local JSON file instead of PostgreSQL (local dev/testing).
-	// The JSON file only lists keyword strings with no org distinction, so
-	// every keyword is tagged with a fixed org_id of 0.
-	const keywordsFile = "configs/keywords.json"
-	log.Info("Loading keywords from local JSON file", zap.String("file", keywordsFile))
-
-	keywords, err := repository.LoadKeywordsFromFile(keywordsFile, 0)
+	postRepo := repository.NewPostRepository(pg.Pool(), log)
+	postURLs, err := postRepo.FindURLsByOrgAndPubTime(dbCtx, cfg.OrgID, cfg.PubTimeAfter)
 	if err != nil {
-		log.Fatal("Failed to load keywords from JSON file", zap.Error(err))
+		log.Fatal("Failed to query tbl_posts", zap.Error(err))
 	}
 
-	var keywordList []string
-	keywordOrgMap := make(map[string]int)
-	for _, kw := range keywords {
-		keywordList = append(keywordList, kw.Keyword)
-		keywordOrgMap[kw.Keyword] = kw.OrgID
+	log.Info("tbl_posts lookup complete",
+		zap.Int("orgID", cfg.OrgID),
+		zap.Int64("pubTimeAfter", cfg.PubTimeAfter),
+		zap.Int("count", len(postURLs)),
+	)
+	for i, url := range postURLs {
+		log.Info("tbl_posts url", zap.Int("index", i+1), zap.String("url", url))
 	}
 
-	if len(keywordList) == 0 {
-		log.Warn("No keywords found, exiting")
+	if len(postURLs) == 0 {
+		log.Warn("No post URLs found, exiting")
 		return
 	}
 
-	log.Info("Keywords loaded",
-		zap.Int("total", len(keywordList)),
-		zap.Strings("keywords", keywordList),
-	)
-
-	// Set keywords to config (will be reused for all crawl cycles, shuffled each cycle in Run())
-	cfg.Keywords = keywordList
-	cfg.KeywordOrgMap = keywordOrgMap
+	// Set URLs to config (will be reused for all crawl cycles, shuffled each cycle in Run())
+	cfg.PostURLs = postURLs
 
 	// Init crawler
 	c := crawler.New(&cfg, log, nil)
 
-	log.Info("Crawler initialized - will crawl same keywords every 1-1.5 hours")
+	log.Info("Crawler initialized - will visit tbl_posts URLs every 1-1.5 hours")
 
 	// Run crawler with the top-level context.
 	// If SIGTERM/SIGINT is received, ctx is cancelled and the entire

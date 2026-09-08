@@ -52,46 +52,6 @@ func NewPublisher(apiClient api.APIClient, log *zap.Logger) *Publisher {
 	return p
 }
 
-// ParseVideos parses raw TikTok API response items into VideoItem models,
-// filtering by cutoff time and skipping items with empty video IDs.
-func (p *Publisher) ParseVideos(keyword string, orgID int, items []map[string]any) []models.VideoItem {
-	nowTs := time.Now().Unix()
-	cutoff := nowTs - cutoffSpan
-	var results []models.VideoItem
-
-	for _, item := range items {
-		pubTime := int64(toFloat(item["createTime"]))
-		if pubTime < cutoff {
-			continue
-		}
-		videoID := toString(item["id"])
-		if videoID == "" {
-			// Skip items without a valid video ID — cannot construct URL or deduplicate.
-			p.log.Sugar().Warnf("parseVideos: skipping item with empty video ID for keyword=%s", keyword)
-			continue
-		}
-		author, _ := item["author"].(map[string]any)
-		stats, _ := item["stats"].(map[string]any)
-
-		results = append(results, models.VideoItem{
-			Keyword:     keyword,
-			OrgID:       orgID,
-			VideoID:     videoID,
-			Description: toString(item["desc"]),
-			PubTime:     pubTime,
-			UniqueID:    toString(mapGet(author, "uniqueId")),
-			AuthID:      toString(mapGet(author, "id")),
-			AuthName:    toString(mapGet(author, "nickname")),
-			Comments:    int64(toFloat(mapGet(stats, "commentCount"))),
-			Shares:      int64(toFloat(mapGet(stats, "shareCount"))),
-			Reactions:   int64(toFloat(mapGet(stats, "diggCount"))),
-			Favors:      int64(toFloat(mapGet(stats, "collectCount"))),
-			Views:       int64(toFloat(mapGet(stats, "playCount"))),
-		})
-	}
-	return results
-}
-
 // PushBatch sends video items to the internal channel for async batch
 // processing. When the channel buffer is full, videos are dropped and a
 // warning is logged — this provides backpressure under API slowdown.

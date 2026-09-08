@@ -25,193 +25,6 @@ func newTestPublisher(t *testing.T, srvURL string) *Publisher {
 	return NewPublisher(apiClient, zap.NewNop())
 }
 
-func TestParseVideos_EmptyVideoID(t *testing.T) {
-	p := newTestPublisher(t, "")
-
-	items := []map[string]any{
-		{
-			"id":         "",
-			"desc":       "some description",
-			"createTime": float64(4102444800), // 2100 — far future
-			"author": map[string]any{
-				"uniqueId": "testuser",
-				"id":       "123",
-				"nickname": "Test User",
-			},
-			"stats": map[string]any{
-				"commentCount": float64(5),
-				"shareCount":   float64(10),
-				"diggCount":    float64(20),
-				"collectCount": float64(3),
-				"playCount":    float64(100),
-			},
-		},
-		{
-			"id":         "valid-id-123",
-			"desc":       "valid video",
-			"createTime": float64(4102444800),
-			"author": map[string]any{
-				"uniqueId": "validuser",
-				"id":       "456",
-				"nickname": "Valid User",
-			},
-			"stats": map[string]any{
-				"commentCount": float64(1),
-				"shareCount":   float64(2),
-				"diggCount":    float64(3),
-				"collectCount": float64(4),
-				"playCount":    float64(5),
-			},
-		},
-	}
-
-	results := p.ParseVideos("test-keyword", 1, items)
-
-	// The item with empty video ID should be skipped; only valid-id-123 should remain.
-	if len(results) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(results))
-	}
-	if results[0].VideoID != "valid-id-123" {
-		t.Errorf("expected video ID 'valid-id-123', got %q", results[0].VideoID)
-	}
-}
-
-func TestParseVideos_AllEmptyVideoIDs(t *testing.T) {
-	p := newTestPublisher(t, "")
-
-	items := []map[string]any{
-		{"id": nil, "desc": "a", "createTime": float64(4102444800)},
-		{"id": "", "desc": "b", "createTime": float64(4102444800)},
-	}
-
-	results := p.ParseVideos("test-keyword", 1, items)
-	if len(results) != 0 {
-		t.Fatalf("expected 0 results, got %d", len(results))
-	}
-}
-
-func TestParseVideos_CutoffFilter(t *testing.T) {
-	p := newTestPublisher(t, "")
-
-	items := []map[string]any{
-		{
-			"id":         "old-video",
-			"desc":       "too old",
-			"createTime": float64(0), // epoch start — definitely before cutoff
-		},
-		{
-			"id":         "recent-video",
-			"desc":       "recent",
-			"createTime": float64(4102444800), // future
-		},
-	}
-
-	results := p.ParseVideos("test-keyword", 1, items)
-
-	// Only the recent video should be included.
-	if len(results) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(results))
-	}
-	if results[0].VideoID != "recent-video" {
-		t.Errorf("expected video ID 'recent-video', got %q", results[0].VideoID)
-	}
-}
-
-func TestParseVideos_MissingAuthorStats(t *testing.T) {
-	p := newTestPublisher(t, "")
-
-	items := []map[string]any{
-		{
-			"id":         "no-nested-maps",
-			"desc":       "minimal item",
-			"createTime": float64(4102444800),
-			// author and stats are missing
-		},
-	}
-
-	results := p.ParseVideos("test-keyword", 1, items)
-	if len(results) != 1 {
-		t.Fatalf("expected 1 result for item with missing author/stats, got %d", len(results))
-	}
-	// Missing fields should default to zero/empty.
-	if results[0].VideoID != "no-nested-maps" {
-		t.Errorf("expected video ID 'no-nested-maps', got %q", results[0].VideoID)
-	}
-	if results[0].AuthName != "" {
-		t.Errorf("expected empty AuthName, got %q", results[0].AuthName)
-	}
-	if results[0].Views != 0 {
-		t.Errorf("expected 0 Views, got %d", results[0].Views)
-	}
-}
-
-func TestParseVideos_VideoItemToModel(t *testing.T) {
-	p := newTestPublisher(t, "")
-
-	items := []map[string]any{
-		{
-			"id":         "full-video-1",
-			"desc":       "Full test description",
-			"createTime": float64(4102444800),
-			"author": map[string]any{
-				"uniqueId": "creator1",
-				"id":       "auth-001",
-				"nickname": "Creator One",
-			},
-			"stats": map[string]any{
-				"commentCount": float64(100),
-				"shareCount":   float64(200),
-				"diggCount":    float64(300),
-				"collectCount": float64(50),
-				"playCount":    float64(10000),
-			},
-		},
-	}
-
-	results := p.ParseVideos("testkeyword", 42, items)
-	if len(results) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(results))
-	}
-
-	v := results[0]
-	if v.Keyword != "testkeyword" {
-		t.Errorf("Keyword: got %q, want %q", v.Keyword, "testkeyword")
-	}
-	if v.OrgID != 42 {
-		t.Errorf("OrgID: got %d, want %d", v.OrgID, 42)
-	}
-	if v.VideoID != "full-video-1" {
-		t.Errorf("VideoID: got %q, want %q", v.VideoID, "full-video-1")
-	}
-	if v.Description != "Full test description" {
-		t.Errorf("Description: got %q, want %q", v.Description, "Full test description")
-	}
-	if v.UniqueID != "creator1" {
-		t.Errorf("UniqueID: got %q, want %q", v.UniqueID, "creator1")
-	}
-	if v.AuthID != "auth-001" {
-		t.Errorf("AuthID: got %q, want %q", v.AuthID, "auth-001")
-	}
-	if v.AuthName != "Creator One" {
-		t.Errorf("AuthName: got %q, want %q", v.AuthName, "Creator One")
-	}
-	if v.Comments != 100 {
-		t.Errorf("Comments: got %d, want %d", v.Comments, 100)
-	}
-	if v.Shares != 200 {
-		t.Errorf("Shares: got %d, want %d", v.Shares, 200)
-	}
-	if v.Reactions != 300 {
-		t.Errorf("Reactions: got %d, want %d", v.Reactions, 300)
-	}
-	if v.Favors != 50 {
-		t.Errorf("Favors: got %d, want %d", v.Favors, 50)
-	}
-	if v.Views != 10000 {
-		t.Errorf("Views: got %d, want %d", v.Views, 10000)
-	}
-}
-
 func TestContainsAny_EmptyString(t *testing.T) {
 	// containsAny should return false for an empty string, regardless of subs.
 	if containsAny("", []string{"a"}) {
@@ -374,11 +187,11 @@ func TestNew_CreatesAPIClient(t *testing.T) {
 	if c.publisher == nil {
 		t.Error("publisher should be created")
 	}
-	if c.searcher == nil {
-		t.Error("searcher should be created")
+	if c.visitor == nil {
+		t.Error("visitor should be created")
 	}
-	if c.searcher.cfg != cfg {
-		t.Error("searcher should use the same config")
+	if c.visitor.cfg != cfg {
+		t.Error("visitor should use the same config")
 	}
 }
 
@@ -391,8 +204,8 @@ func TestNew_NoAPIClientWhenEmptyURL(t *testing.T) {
 	if c.apiClient != nil {
 		t.Error("apiClient should be nil when APIURL is empty")
 	}
-	if c.searcher == nil {
-		t.Error("searcher should still be created even when API client is nil")
+	if c.visitor == nil {
+		t.Error("visitor should still be created even when API client is nil")
 	}
 }
 

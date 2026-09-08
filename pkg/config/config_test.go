@@ -173,7 +173,6 @@ func TestLoad_Defaults(t *testing.T) {
 		{"RestMaxSession", cfg.RestMaxSession, 300},
 		{"BatchMin", cfg.BatchMin, 3},
 		{"BatchMax", cfg.BatchMax, 5},
-		{"MaxVideosPerKeyword", cfg.MaxVideosPerKeyword, 200},
 		{"MaxPagesPerSession", cfg.MaxPagesPerSession, 20},
 	}
 
@@ -185,8 +184,8 @@ func TestLoad_Defaults(t *testing.T) {
 		})
 	}
 
-	if len(cfg.Keywords) != 0 {
-		t.Errorf("Keywords default = %v, want empty slice", cfg.Keywords)
+	if len(cfg.PostURLs) != 0 {
+		t.Errorf("PostURLs default = %v, want empty slice", cfg.PostURLs)
 	}
 	if cfg.UseGPM {
 		t.Errorf("UseGPM default = true, want false (no PROFILE_IDS set)")
@@ -205,7 +204,6 @@ func TestLoad_CustomValues(t *testing.T) {
 		setEnv(t, "OUTPUT_DIR", "/custom/output"),
 		setEnv(t, "API_URL", "https://api.example.com"),
 		setEnv(t, "PROFILE_IDS", "profile1,profile2"),
-		setEnv(t, "KEYWORDS", "keyword1,keyword2"),
 		setEnv(t, "POSTGRES_MAX_POOL_SIZE", "50"),
 		setEnv(t, "POSTGRES_MIN_POOL_SIZE", "5"),
 		setEnv(t, "HTTP_TIMEOUT_SECONDS", "45"),
@@ -215,7 +213,6 @@ func TestLoad_CustomValues(t *testing.T) {
 		setEnv(t, "REST_MAX_SESSION", "20000"),
 		setEnv(t, "BATCH_MIN", "2"),
 		setEnv(t, "BATCH_MAX", "8"),
-		setEnv(t, "MAX_VIDEOS_PER_KEYWORD", "300"),
 		setEnv(t, "MAX_PAGES_PER_SESSION", "50"),
 		setEnv(t, "LOG_MAX_SIZE_MB", "200"),
 		setEnv(t, "LOG_MAX_AGE_DAYS", "14"),
@@ -255,7 +252,6 @@ func TestLoad_CustomValues(t *testing.T) {
 		{"RestMaxSession", cfg.RestMaxSession, 20000},
 		{"BatchMin", cfg.BatchMin, 2},
 		{"BatchMax", cfg.BatchMax, 8},
-		{"MaxVideosPerKeyword", cfg.MaxVideosPerKeyword, 300},
 		{"MaxPagesPerSession", cfg.MaxPagesPerSession, 50},
 		{"LogMaxSizeMB", cfg.LogMaxSizeMB, 200},
 		{"LogMaxAgeDays", cfg.LogMaxAgeDays, 14},
@@ -275,9 +271,6 @@ func TestLoad_CustomValues(t *testing.T) {
 	}
 	if !cfg.UseGPM {
 		t.Error("UseGPM should be true when GPM_API and PROFILE_IDS are set")
-	}
-	if len(cfg.Keywords) != 2 || cfg.Keywords[0] != "keyword1" || cfg.Keywords[1] != "keyword2" {
-		t.Errorf("Keywords = %v, want [keyword1 keyword2]", cfg.Keywords)
 	}
 }
 

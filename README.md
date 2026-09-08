@@ -1,6 +1,6 @@
 # ABP Bot TikTok
 
-TikTok crawler bot viết bằng Go với Playwright, crawl kết quả search công khai của TikTok qua GPM (GoLogin Profile Manager) và đẩy dữ liệu ra một backend API bên ngoài.
+Bot viết bằng Go với Playwright, dùng GPM (GoLogin Profile Manager) để mở lần lượt các URL video TikTok đã biết (lấy từ bảng `tbl_posts` của backend) và scrape lại số liệu hiện tại (views/likes/comments/shares...) của từng video.
 
 ## Cấu trúc
 
@@ -8,20 +8,18 @@ TikTok crawler bot viết bằng Go với Playwright, crawl kết quả search c
 ├── cmd/
 │   └── main.go           # Entry point chính
 ├── internal/
-│   ├── crawler/          # Orchestrator + GPM circuit breaker, scraper, searcher, publisher
+│   ├── crawler/          # Orchestrator + GPM circuit breaker, scraper, visitor (visit URL), publisher
 │   ├── models/           # Data models (VideoItem)
 │   ├── parser/           # Convert VideoItem -> payload gửi API (TiktokPost)
-│   ├── repository/       # Đọc keyword (JSON file / PostgreSQL — xem ghi chú bên dưới)
+│   ├── repository/       # Truy vấn PostgreSQL (tbl_posts, keyword/bot_config — xem ghi chú bên dưới)
 │   ├── scheduler/        # Vòng lặp crawl định kỳ (random interval)
 │   └── utils/            # Utilities (scroll, delay, retry, resource monitor)
 ├── pkg/
-│   ├── api/               # HTTP client đẩy dữ liệu lên backend
+│   ├── api/               # HTTP client đẩy dữ liệu lên backend (hiện chưa được gọi — xem "Đẩy dữ liệu ra ngoài")
 │   ├── config/            # Config loader (.env)
-│   ├── database/          # PostgreSQL client (hiện chưa được gọi ở main.go)
+│   ├── database/          # PostgreSQL client
 │   ├── gpm/                # HTTP client điều khiển GoLogin Profile Manager
 │   └── logger/            # Zap logger
-├── configs/
-│   └── keywords.json      # Danh sách keyword crawl (nguồn keyword hiện tại)
 └── data/                  # Log output (OUTPUT_DIR)
 ```
 
@@ -48,17 +46,15 @@ go run github.com/playwright-community/playwright-go/cmd/playwright@v0.5700.1 in
 ### 4. GPM (GoLogin Profile Manager) — bắt buộc
 Bot **luôn cần GPM để chạy** (không có chế độ dùng local Chrome trực tiếp trong code hiện tại — nếu `GPM_API`/`PROFILE_IDS` thiếu, mỗi chu kỳ crawl sẽ bị bỏ qua với log lỗi). Xem chi tiết cài đặt ở phần "GPM Setup" bên dưới.
 
-### 5. PostgreSQL
-`POSTGRES_DSN` là biến **bắt buộc phải điền**. Khi vào `main()`, bot kết nối PostgreSQL và chạy một truy vấn một lần để lấy URL các bài viết đã có sẵn trong `tbl_posts` (bảng thuộc backend, không phải bảng do bot quản lý):
+### 5. PostgreSQL — bắt buộc
+`POSTGRES_DSN` là biến bắt buộc. Khi vào `main()`, bot kết nối PostgreSQL và chạy một truy vấn để lấy URL các bài viết đã có sẵn trong `tbl_posts` (bảng thuộc backend, không phải bảng do bot quản lý):
 
 ```sql
 SELECT tp.url FROM tbl_posts tp
  WHERE tp.org_id = $ORG_ID AND tp.crawl_source_code = 'tt' AND tp.pub_time > $PUB_TIME
 ```
 
-`ORG_ID` và `PUB_TIME` (unix seconds) cũng là biến **bắt buộc**, dùng để lọc truy vấn này (xem [internal/repository/post_repo.go](internal/repository/post_repo.go)). Nếu PostgreSQL không kết nối được, bước này chỉ log lỗi (không fatal) — vòng crawl chính vẫn chạy bình thường vì nó đọc keyword từ `configs/keywords.json`, không phụ thuộc bước này.
-
-Phần code đọc **keyword** từ PostgreSQL (bảng `keyword`) vẫn đang bị **comment out** trong `cmd/main.go` — không liên quan tới truy vấn `tbl_posts` ở trên.
+`ORG_ID` và `PUB_TIME` (unix seconds) cũng là biến **bắt buộc**, dùng để lọc truy vấn này (xem [internal/repository/post_repo.go](internal/repository/post_repo.go)). Danh sách URL trả về là **nguồn crawl target duy nhất** của bot — nếu PostgreSQL không kết nối được, hoặc query lỗi, hoặc không có URL nào khớp, bot sẽ thoát ngay (log Fatal/Warn tương ứng), vì không còn nguồn nào khác để crawl.
 
 ## Cấu hình
 
@@ -81,7 +77,7 @@ PUB_TIME=1785517201
 # GPM — danh sách nhiều profile, phân tách dấu phẩy. Để trống = bot không crawl được gì.
 # PROFILE_IDS=profile-1,profile-2
 
-# Backend API nhận dữ liệu crawl (để trống = crash khi có video cần đẩy — xem mục "Đẩy dữ liệu")
+# Backend API nhận dữ liệu crawl (hiện chưa được gọi — xem mục "Đẩy dữ liệu ra ngoài")
 # API_URL=http://localhost:8080/api
 
 # Thư mục chứa log
@@ -96,17 +92,14 @@ PUB_TIME=1785517201
 # LOG_MAX_AGE_DAYS=7
 # LOG_MAX_BACKUPS=7
 
-# PostgreSQL pool (chỉ áp dụng nếu sau này bật lại phần kết nối Postgres)
+# PostgreSQL pool
 # POSTGRES_MAX_POOL_SIZE=100
 # POSTGRES_MIN_POOL_SIZE=10
 
 # HTTP client gọi API_URL
 # HTTP_TIMEOUT_SECONDS=30
 
-# Danh sách keyword fallback qua env (hiện KHÔNG được main.go dùng — xem mục "Nguồn keyword")
-# KEYWORDS=keyword1,keyword2
-
-# Nghỉ giữa các keyword trong cùng 1 batch (giây)
+# Nghỉ giữa các URL trong cùng 1 batch (giây)
 # SLEEP_MIN_KEYWORD=60
 # SLEEP_MAX_KEYWORD=180
 
@@ -114,21 +107,13 @@ PUB_TIME=1785517201
 # REST_MIN_SESSION=180
 # REST_MAX_SESSION=300
 
-# Số keyword gom trong 1 batch trước khi nghỉ session
+# Số URL gom trong 1 batch (1 browser session) trước khi nghỉ
 # BATCH_MIN=3
 # BATCH_MAX=5
 
-# Giới hạn chống crawl quá đà
-# MAX_VIDEOS_PER_KEYWORD=200
+# Giới hạn số "trang" (batch) tối đa mỗi session, chống crawl quá đà
 # MAX_PAGES_PER_SESSION=20
 ```
-
-### Nguồn keyword
-Bot **không** đọc keyword từ PostgreSQL ở thời điểm hiện tại (đoạn code đó bị comment trong `cmd/main.go`), và cũng không đọc từ biến env `KEYWORDS`. Nguồn keyword thực tế là file `configs/keywords.json` — một mảng JSON các chuỗi keyword, ví dụ:
-```json
-["Xã Xuân Giang", "phường Láng Hạ"]
-```
-File JSON không phân biệt org, nên mọi keyword đọc từ đây đều được gán cố định `org_id = 0` (hardcode trong `cmd/main.go`) khi đẩy dữ liệu ra API.
 
 ## Sử dụng
 
@@ -145,8 +130,8 @@ bot.exe
 ```
 Ở chế độ production, bot **không dùng cron biểu thức** — logic lặp nằm trong `internal/scheduler`:
 1. Nếu giờ hiện tại nằm trong khoảng 00:00–03:00, bot ngủ tới đúng 03:00 mới bắt đầu (né giờ đêm).
-2. Chạy ngay 1 chu kỳ crawl toàn bộ keyword.
-3. Sau khi xong, nghỉ một khoảng **ngẫu nhiên 30–45 phút** rồi lặp lại bước 1.
+2. Chạy ngay 1 chu kỳ crawl toàn bộ URL đã lấy từ `tbl_posts` lúc khởi động.
+3. Sau khi xong, nghỉ một khoảng **ngẫu nhiên 30–45 phút** rồi lặp lại bước 1 (cùng danh sách URL — không truy vấn lại `tbl_posts` giữa các chu kỳ).
 
 ## Tự khởi động cùng Windows
 
@@ -165,7 +150,7 @@ install_startup.bat
 
 ## GPM Setup (GoLogin Profile Manager)
 
-GPM cho phép sử dụng (các) browser profile đã login TikTok sẵn, tránh phải login lại mỗi lần chạy. Bot hỗ trợ chạy **nhiều profile song song** qua `PROFILE_IDS` — mỗi profile crawl một phần keyword riêng (chia round-robin), profile sau được khởi động lệch ngẫu nhiên 15–45s so với profile trước.
+GPM cho phép sử dụng (các) browser profile đã login TikTok sẵn, tránh phải login lại mỗi lần chạy. Bot hỗ trợ chạy **nhiều profile song song** qua `PROFILE_IDS` — mỗi profile visit một phần danh sách URL riêng (chia round-robin), profile sau được khởi động lệch ngẫu nhiên 15–45s so với profile trước.
 
 ### Cài đặt GPM
 1. Download GPM: https://gologin.com/
@@ -183,17 +168,20 @@ curl <GPM_API>/profiles
 ```
 Nếu lỗi → mở GPM trước khi chạy bot.
 
-### Cách bot hoạt động khi có GPM (mỗi batch keyword)
+### Cách bot hoạt động khi có GPM (mỗi batch URL)
 1. Gọi GPM API để start profile (retry tối đa 5 lần nếu browser chưa sẵn sàng)
 2. Lấy `ws_endpoint` (hoặc `remote_debugging_address` rồi query CDP `/json/version`)
 3. Connect Playwright qua CDP (Chrome DevTools Protocol) — có circuit breaker: mở sau 3 lần lỗi liên tiếp, tự thử lại sau 5 phút, retry kết nối với backoff 1s/2s/4s
-4. Sử dụng browser đã login sẵn để search từng keyword trong batch
-5. Sau khi crawl xong batch, đóng browser và gọi GPM để stop profile
-6. Nghỉ ngẫu nhiên rồi lặp lại cho batch tiếp theo
+4. Với browser đã login sẵn: mở trang chủ TikTok (warm-up), rồi `Goto` trực tiếp từng URL video trong batch
+5. Trên mỗi trang video: bắt response XHR `/api/item_detail/` (fallback: đọc script `#__UNIVERSAL_DATA_FOR_REHYDRATION__` nếu không bắt được XHR) để lấy `id/desc/createTime/author/stats`
+6. Sau khi visit xong batch, đóng browser và gọi GPM để stop profile
+7. Nghỉ ngẫu nhiên rồi lặp lại cho batch tiếp theo
 
 ## Đẩy dữ liệu ra ngoài
 
-Bot **không ghi trực tiếp vào PostgreSQL**. Video crawl được đưa vào một buffer nội bộ (3 worker, gom tối đa 10 video hoặc mỗi 5 giây) rồi `POST` theo batch tới:
+**Hiện tại bot chỉ log dữ liệu scrape được, chưa đẩy đi đâu.** Mỗi video visit thành công được log ở mức Info với đầy đủ `video_id/views/comments/shares/reactions/favors/author` (xem `internal/crawler/visitor.go`).
+
+Hạ tầng đẩy batch lên backend (`internal/crawler/publisher.go`, `pkg/api/client.go`) vẫn còn nguyên — 3 worker gom tối đa 10 video hoặc mỗi 5 giây rồi `POST` tới:
 
 ```
 POST {API_URL}/api/v1/posts/insert-unclassified-org-posts
@@ -206,57 +194,45 @@ Content-Type: application/json
     {
       "org_id": 2,
       "subject_id": "7123456789",
-      "description": "...",
       "url": "https://www.tiktok.com/@username/video/7123456789",
-      "auth_id": "123456",
-      "auth_name": "Display Name",
       "comments": 100,
       "shares": 50,
       "reactions": 1000,
       "favors": 200,
       "views": 10000,
-      "pub_time": 1714089600,
-      "crawl_time": 1714090000,
-      "crawl_source_code": "tt",
-      "crawl_bot": "tiktok-1",
       "...": "xem đầy đủ field ở internal/parser/tiktok_post.go"
     }
   ]
 }
 ```
 
-Retry 2 lần (có backoff) nếu request lỗi; nếu vẫn thất bại thì log warning và bỏ batch đó (không chặn crawl tiếp).
-
-**Quan trọng:** nếu `API_URL` để trống, bot vẫn khởi động và crawl bình thường nhưng sẽ lỗi (`nil pointer`) ngay khi có video đầu tiên cần đẩy đi. Luôn cấu hình `API_URL` trỏ tới backend thật khi chạy production.
-
-Khi channel buffer đầy (backend chậm/API_URL sai), video mới sẽ bị **drop kèm log warning** thay vì bị block — đây là cơ chế backpressure chủ động, không phải lỗi.
+Nhưng luồng visit-URL hiện tại **chưa gọi tới** `Publisher.PushBatch` — cần nối thêm khi có yêu cầu cập nhật số liệu về backend.
 
 ## Tính năng
 
-- ✅ Multi-profile GPM chạy song song, tự chia keyword round-robin
+- ✅ Multi-profile GPM chạy song song, tự chia danh sách URL round-robin
 - ✅ Circuit breaker cho kết nối GPM (closed/open/half-open) + retry backoff
-- ✅ Intercept TikTok search API (`/api/search/item/full/`)
-- ✅ Human-like behavior (scroll, mouse move, random view video)
+- ✅ Lấy danh sách URL crawl target từ `tbl_posts` (PostgreSQL) theo `ORG_ID`/`PUB_TIME`
+- ✅ Intercept TikTok video-detail API (`/api/item_detail/`), fallback đọc JSON nhúng trong trang (`__UNIVERSAL_DATA_FOR_REHYDRATION__`)
+- ✅ Human-like behavior (scroll, mouse move, warm-up ở trang chủ trước khi vào video)
 - ✅ Theo dõi CPU/RAM, tạm dừng crawl nếu máy quá tải (>80%)
 - ✅ Né khung giờ đêm (00:00–03:00), chạy lại lúc 03:00
-- ✅ Giới hạn video/keyword và số trang/session để tránh crawl quá đà
-- ✅ Đẩy dữ liệu theo batch tới backend API, có backpressure khi API chậm
+- ✅ Giới hạn số batch/session để tránh crawl quá đà
 - ✅ Structured logging (Zap), có session ID riêng cho mỗi lần chạy profile
 
 ## Anti-ban
 
 Code đã có:
-- Random sleep giữa keywords (mặc định 60–180s, cấu hình qua `SLEEP_MIN/MAX_KEYWORD`)
+- Random sleep giữa các URL (mặc định 60–180s, cấu hình qua `SLEEP_MIN/MAX_KEYWORD`)
 - Random rest giữa các batch/session (mặc định 180–300s, cấu hình qua `REST_MIN/MAX_SESSION`)
 - Stagger khởi động giữa các profile (15–45s)
 - Human scroll simulation
 - Random mouse movement
-- Random video viewing
+- Warm-up ở trang chủ trước khi vào từng video
 - Tự tạm dừng 5 phút khi phát hiện rate-limit/captcha từ response API
 
 Khuyến nghị thêm:
 - Chỉ chạy 7h-23h (tránh 2h-6h sáng)
-- Giới hạn ~50-100 keywords/ngày
 - Dùng profile GPM đã có lịch sử duyệt web thật
 - Rotate IP nếu crawl nhiều
 
@@ -280,17 +256,17 @@ go run github.com/playwright-community/playwright-go/cmd/playwright@v0.5700.1 in
 ### Lỗi: "gpm circuit breaker open: N consecutive failures, reset in ..."
 → Kết nối GPM đã lỗi liên tiếp 3 lần, bot tạm ngừng thử trong 5 phút để tránh spam. Kiểm tra GPM đang chạy ổn định, chờ circuit tự chuyển sang half-open rồi bot sẽ thử lại.
 
-### Không thấy video nào được crawl / danh sách keyword rỗng
-→ Bot đọc keyword từ `configs/keywords.json`, không phải PostgreSQL. Kiểm tra file này tồn tại và có ít nhất 1 keyword hợp lệ.
+### Bot thoát ngay khi khởi động, log "No post URLs found, exiting"
+→ Truy vấn `tbl_posts` với `ORG_ID`/`PUB_TIME` hiện tại không trả về URL nào. Kiểm tra lại 2 giá trị này (đặc biệt `PUB_TIME` — quá lớn sẽ lọc hết dữ liệu cũ).
 
-### Video crawl được nhưng không thấy dữ liệu ở backend / bot crash khi đẩy API
-→ Kiểm tra `API_URL` đã được điền đúng và trỏ tới backend đang chạy, endpoint `POST /api/v1/posts/insert-unclassified-org-posts` trả về status < 400.
+### Không thấy video nào scrape được / log toàn "no video data extracted"
+→ TikTok có thể đã đổi cấu trúc response `/api/item_detail/` hoặc script `__UNIVERSAL_DATA_FOR_REHYDRATION__` — cần capture lại network trace thực tế và cập nhật `internal/crawler/visitor.go`.
 
 ## Deploy lên server khác
 
 1. Copy toàn bộ project
 2. Cài Playwright driver (xem mục Cài đặt)
-3. Sửa `.env` với config đúng (đặc biệt `GPM_API`, `PROFILE_IDS`, `API_URL`)
+3. Sửa `.env` với config đúng (đặc biệt `GPM_API`, `PROFILE_IDS`, `POSTGRES_DSN`)
 4. Chạy `go run cmd/main.go`
 
 **Hoặc build binary trên máy dev rồi copy:**

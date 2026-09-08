@@ -4,48 +4,48 @@ import (
 	"testing"
 )
 
-func TestSplitKeywords(t *testing.T) {
+func TestSplitURLs(t *testing.T) {
 	tests := []struct {
-		name     string
-		keywords []string
-		n        int
-		want     [][]string
+		name string
+		urls []string
+		n    int
+		want [][]string
 	}{
 		{
-			name:     "even distribution",
-			keywords: []string{"a", "b", "c", "d"},
-			n:        2,
-			want:     [][]string{{"a", "c"}, {"b", "d"}},
+			name: "even distribution",
+			urls: []string{"a", "b", "c", "d"},
+			n:    2,
+			want: [][]string{{"a", "c"}, {"b", "d"}},
 		},
 		{
-			name:     "more keywords than chunks",
-			keywords: []string{"a", "b", "c", "d", "e"},
-			n:        3,
-			want:     [][]string{{"a", "d"}, {"b", "e"}, {"c"}},
+			name: "more urls than chunks",
+			urls: []string{"a", "b", "c", "d", "e"},
+			n:    3,
+			want: [][]string{{"a", "d"}, {"b", "e"}, {"c"}},
 		},
 		{
-			name:     "fewer keywords than chunks",
-			keywords: []string{"a", "b"},
-			n:        5,
-			want:     [][]string{{"a"}, {"b"}, nil, nil, nil},
+			name: "fewer urls than chunks",
+			urls: []string{"a", "b"},
+			n:    5,
+			want: [][]string{{"a"}, {"b"}, nil, nil, nil},
 		},
 		{
-			name:     "single chunk",
-			keywords: []string{"a", "b", "c"},
-			n:        1,
-			want:     [][]string{{"a", "b", "c"}},
+			name: "single chunk",
+			urls: []string{"a", "b", "c"},
+			n:    1,
+			want: [][]string{{"a", "b", "c"}},
 		},
 		{
-			name:     "empty keywords",
-			keywords: []string{},
-			n:        3,
-			want:     [][]string{nil, nil, nil},
+			name: "empty urls",
+			urls: []string{},
+			n:    3,
+			want: [][]string{nil, nil, nil},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := splitKeywords(tt.keywords, tt.n)
+			got := splitURLs(tt.urls, tt.n)
 			if len(got) != len(tt.want) {
 				t.Fatalf("len = %d, want %d", len(got), len(tt.want))
 			}

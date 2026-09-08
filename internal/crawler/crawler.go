@@ -19,14 +19,12 @@ import (
 )
 
 const (
-	tiktokURL  = "https://www.tiktok.com"
-	searchAPI  = "/api/search/item/full/"
-	cutoffSpan = 7 * 24 * 60 * 60
+	tiktokURL = "https://www.tiktok.com"
 )
 
-// Crawler is the top-level orchestrator that coordinates search crawling
-// across multiple GPM profiles. Each sub-concern (GPM connections, page
-// scraping, video parsing/publishing, search loops) is delegated to a
+// Crawler is the top-level orchestrator that coordinates direct video-URL
+// visits across multiple GPM profiles. Each sub-concern (GPM connections,
+// page scraping, video parsing/publishing, visit loops) is delegated to a
 // dedicated service.
 type Crawler struct {
 	cfg       *config.Config
@@ -36,7 +34,7 @@ type Crawler struct {
 	gpmSvc    *GPMService
 	scraper   *Scraper
 	publisher *Publisher
-	searcher  *Searcher
+	visitor   *URLVisitor
 }
 
 // New creates a fully wired Crawler with all sub-services.
@@ -48,7 +46,7 @@ func New(cfg *config.Config, log *zap.Logger, videoRepo repository.VideoStore) *
 	gpmSvc := NewGPMService()
 	scraper := NewScraper()
 	publisher := NewPublisher(apiClient, log)
-	searcher := NewSearcher(cfg, publisher, gpmSvc, scraper)
+	visitor := NewURLVisitor(cfg, gpmSvc, scraper)
 
 	return &Crawler{
 		cfg:       cfg,
@@ -58,11 +56,11 @@ func New(cfg *config.Config, log *zap.Logger, videoRepo repository.VideoStore) *
 		gpmSvc:    gpmSvc,
 		scraper:   scraper,
 		publisher: publisher,
-		searcher:  searcher,
+		visitor:   visitor,
 	}
 }
 
-// Run starts search crawling across all configured GPM profiles.
+// Run starts URL-visit crawling across all configured GPM profiles.
 func (c *Crawler) Run(ctx context.Context) {
 	if c.cfg == nil || c.log == nil {
 		if c.log != nil {
@@ -75,23 +73,23 @@ func (c *Crawler) Run(ctx context.Context) {
 		return
 	}
 
-	keywords := make([]string, len(c.cfg.Keywords))
-	copy(keywords, c.cfg.Keywords)
-	rand.Shuffle(len(keywords), func(i, j int) {
-		keywords[i], keywords[j] = keywords[j], keywords[i]
+	urls := make([]string, len(c.cfg.PostURLs))
+	copy(urls, c.cfg.PostURLs)
+	rand.Shuffle(len(urls), func(i, j int) {
+		urls[i], urls[j] = urls[j], urls[i]
 	})
 
-	c.log.Info("Crawl cycle: keywords to crawl",
-		zap.Int("total_keywords", len(keywords)),
+	c.log.Info("Crawl cycle: URLs to visit",
+		zap.Int("total_urls", len(urls)),
 	)
 
 	numProfiles := len(c.cfg.ProfileIDs)
-	chunks := splitKeywords(keywords, numProfiles)
+	chunks := splitURLs(urls, numProfiles)
 
 	for i, profileID := range c.cfg.ProfileIDs {
-		c.log.Info("Keyword assignment",
+		c.log.Info("URL assignment",
 			zap.String("profile_id", profileID),
-			zap.Int("keyword_count", len(chunks[i])),
+			zap.Int("url_count", len(chunks[i])),
 		)
 	}
 
@@ -99,9 +97,9 @@ func (c *Crawler) Run(ctx context.Context) {
 launch:
 	for i, profileID := range c.cfg.ProfileIDs {
 		wg.Add(1)
-		go func(profileID string, keywords []string, idx int) {
+		go func(profileID string, urls []string, idx int) {
 			defer wg.Done()
-			c.runProfile(ctx, profileID, keywords, idx)
+			c.runProfile(ctx, profileID, urls, idx)
 		}(profileID, chunks[i], i)
 
 		if i < numProfiles-1 {
@@ -116,17 +114,17 @@ launch:
 	wg.Wait()
 }
 
-// splitKeywords distributes keywords across n profiles in a round-robin fashion.
-func splitKeywords(keywords []string, n int) [][]string {
+// splitURLs distributes URLs across n profiles in a round-robin fashion.
+func splitURLs(urls []string, n int) [][]string {
 	chunks := make([][]string, n)
-	for i, kw := range keywords {
-		chunks[i%n] = append(chunks[i%n], kw)
+	for i, u := range urls {
+		chunks[i%n] = append(chunks[i%n], u)
 	}
 	return chunks
 }
 
 // runProfile runs the crawl for a single GPM profile.
-func (c *Crawler) runProfile(ctx context.Context, profileID string, keywords []string, idx int) {
+func (c *Crawler) runProfile(ctx context.Context, profileID string, urls []string, idx int) {
 	tag := fmt.Sprintf("[P%d|%s...]", idx+1, profileID[:8])
 
 	// Generate session ID for this profile run and use session-aware logger.
@@ -135,7 +133,7 @@ func (c *Crawler) runProfile(ctx context.Context, profileID string, keywords []s
 	sessionLog.Info("Profile run started",
 		zap.String("tag", tag),
 		zap.String("profile_id", profileID),
-		zap.Int("total_keywords", len(keywords)),
+		zap.Int("total_urls", len(urls)),
 	)
 
 	pw, err := playwright.Run()
@@ -146,7 +144,7 @@ func (c *Crawler) runProfile(ctx context.Context, profileID string, keywords []s
 	defer func() { _ = pw.Stop() }()
 
 	gpmClient := gpm.NewClient(c.cfg.GPMAPI, sessionLog)
-	c.searcher.CrawlSearch(ctx, pw, gpmClient, profileID, keywords, sessionLog, tag)
+	c.visitor.CrawlURLs(ctx, pw, gpmClient, profileID, urls, sessionLog, tag)
 }
 
 // Utility functions shared across the crawler package.

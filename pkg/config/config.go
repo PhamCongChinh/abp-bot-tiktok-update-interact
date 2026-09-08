@@ -42,23 +42,23 @@ type Config struct {
 	ProfileIDs []string
 	UseGPM     bool
 
-	// Keywords (can be populated from env or PostgreSQL at runtime)
-	Keywords      []string
-	KeywordOrgMap map[string]int
+	// PostURLs is the list of TikTok video URLs to visit, fetched from
+	// tbl_posts at startup (see ORG_ID/PUB_TIME above). Not env-driven — set
+	// programmatically by main() before the crawler runs.
+	PostURLs []string
 
-	// Crawl timing (seconds)
+	// Crawl timing (seconds): pacing between URL visits and between batches.
 	SleepMinKeyword int
 	SleepMaxKeyword int
 	RestMinSession  int
 	RestMaxSession  int
 
-	// Batch limits
+	// Batch limits: URLs visited per browser session before reconnecting.
 	BatchMin int
 	BatchMax int
 
 	// Pagination guards
-	MaxVideosPerKeyword int
-	MaxPagesPerSession  int
+	MaxPagesPerSession int
 }
 
 // Load reads configuration from environment variables (with .env file support),
@@ -238,13 +238,8 @@ func loadGpmSettings(cfg *Config, errs *[]string) {
 	cfg.UseGPM = cfg.GPMAPI != "" && len(cfg.ProfileIDs) > 0
 }
 
-// loadCrawlSettings populates crawl timing, batch limits, and keyword configuration.
+// loadCrawlSettings populates crawl timing and batch limits.
 func loadCrawlSettings(cfg *Config, errs *[]string) {
-	keywordsStr := optStr(errs, "KEYWORDS", "")
-	if keywordsStr != "" {
-		cfg.Keywords = splitComma(keywordsStr)
-	}
-
 	cfg.SleepMinKeyword = optInt(errs, "SLEEP_MIN_KEYWORD", 60)
 	cfg.SleepMaxKeyword = optInt(errs, "SLEEP_MAX_KEYWORD", 180)
 	cfg.RestMinSession = optInt(errs, "REST_MIN_SESSION", 180)
@@ -253,7 +248,6 @@ func loadCrawlSettings(cfg *Config, errs *[]string) {
 	cfg.BatchMin = optInt(errs, "BATCH_MIN", 3)
 	cfg.BatchMax = optInt(errs, "BATCH_MAX", 5)
 
-	cfg.MaxVideosPerKeyword = optInt(errs, "MAX_VIDEOS_PER_KEYWORD", 200)
 	cfg.MaxPagesPerSession = optInt(errs, "MAX_PAGES_PER_SESSION", 20)
 }
 
