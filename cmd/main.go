@@ -80,8 +80,10 @@ func main() {
 				zap.Int("orgID", cfg.OrgID),
 				zap.Int64("pubTimeAfter", cfg.PubTimeAfter),
 				zap.Int("count", len(postURLs)),
-				zap.Strings("urls", postURLs),
 			)
+			for i, url := range postURLs {
+				log.Info("tbl_posts url", zap.Int("index", i+1), zap.String("url", url))
+			}
 		}
 	}
 
