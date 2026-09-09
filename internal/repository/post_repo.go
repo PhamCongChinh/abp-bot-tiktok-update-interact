@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -12,10 +13,11 @@ import (
 // value tagged on every post this bot pushes to tbl_posts.
 const tiktokSourceCode = "tt"
 
-// PostStore abstracts read access to tbl_posts (owned by the backend, not by
-// this bot — no migration is run against it here).
+// PostStore abstracts access to tbl_posts (owned by the backend, not by this
+// bot — no migration is run against it here).
 type PostStore interface {
 	FindURLsByOrgAndPubTime(ctx context.Context, orgID int, pubTimeAfter int64) ([]string, error)
+	UpdateStatsByURL(ctx context.Context, url string, comments, shares, reactions, favors, views int64) (int64, error)
 }
 
 type PostRepository struct {
@@ -65,4 +67,36 @@ func (r *PostRepository) FindURLsByOrgAndPubTime(ctx context.Context, orgID int,
 	}
 
 	return urls, nil
+}
+
+// UpdateStatsByURL refreshes the engagement stats of a tbl_posts row after a
+// re-visit and returns the number of rows affected (0 means no post in
+// tbl_posts matched the given URL). Equivalent to:
+//
+//	UPDATE tbl_posts tp
+//	   SET comments = $1, shares = $2, reactions = $3, favors = $4, views = $5
+//	 WHERE tp.url = $6
+func (r *PostRepository) UpdateStatsByURL(ctx context.Context, url string, comments, shares, reactions, favors, views int64) (int64, error) {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE tbl_posts tp
+		   SET comments = $1,
+		       shares = $2,
+		       reactions = $3,
+		       favors = $4,
+		       views = $5
+		 WHERE tp.url = $6
+	`, comments, shares, reactions, favors, views, url)
+	if err != nil {
+		return 0, fmt.Errorf("UpdateStatsByURL %q: %w", url, err)
+	}
+
+	rowsAffected := tag.RowsAffected()
+	if rowsAffected == 0 {
+		r.log.Warn("UpdateStatsByURL: no matching row in tbl_posts", zap.String("url", url))
+	}
+
+	return rowsAffected, nil
 }

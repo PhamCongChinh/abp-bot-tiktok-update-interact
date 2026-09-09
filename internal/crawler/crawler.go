@@ -9,7 +9,6 @@ import (
 
 	"abp-bot-tiktok/internal/repository"
 	"abp-bot-tiktok/internal/utils"
-	"abp-bot-tiktok/pkg/api"
 	"abp-bot-tiktok/pkg/config"
 	"abp-bot-tiktok/pkg/gpm"
 	"abp-bot-tiktok/pkg/logger"
@@ -30,32 +29,27 @@ type Crawler struct {
 	cfg       *config.Config
 	log       *zap.Logger
 	videoRepo repository.VideoStore
-	apiClient api.APIClient
+	postRepo  repository.PostStore
 	gpmSvc    *GPMService
 	scraper   *Scraper
-	publisher *Publisher
 	visitor   *URLVisitor
 }
 
-// New creates a fully wired Crawler with all sub-services.
-func New(cfg *config.Config, log *zap.Logger, videoRepo repository.VideoStore) *Crawler {
-	var apiClient api.APIClient
-	if cfg.APIURL != "" {
-		apiClient = api.NewClient(cfg.APIURL, time.Duration(cfg.HTTPTimeoutSeconds)*time.Second, log)
-	}
+// New creates a fully wired Crawler with all sub-services. postRepo may be
+// nil (e.g. in tests) — when nil, scraped stats are logged but not written
+// back to tbl_posts.
+func New(cfg *config.Config, log *zap.Logger, videoRepo repository.VideoStore, postRepo repository.PostStore) *Crawler {
 	gpmSvc := NewGPMService()
 	scraper := NewScraper()
-	publisher := NewPublisher(apiClient, log)
-	visitor := NewURLVisitor(cfg, gpmSvc, scraper)
+	visitor := NewURLVisitor(cfg, gpmSvc, scraper, postRepo)
 
 	return &Crawler{
 		cfg:       cfg,
 		log:       log,
 		videoRepo: videoRepo,
-		apiClient: apiClient,
+		postRepo:  postRepo,
 		gpmSvc:    gpmSvc,
 		scraper:   scraper,
-		publisher: publisher,
 		visitor:   visitor,
 	}
 }
@@ -203,14 +197,4 @@ func min(a, b int) int {
 // retry attempt: 1s → 2s → 4s → 8s → ...
 func backoffDuration(attempt int) time.Duration {
 	return time.Duration(1<<(attempt-1)) * time.Second
-}
-
-// Shutdown gracefully shuts down the Crawler's publisher, draining any
-// buffered videos and flushing the final batch to the API.
-func (c *Crawler) Shutdown() {
-	if c.publisher != nil {
-		c.log.Info("Crawler: shutting down publisher...")
-		c.publisher.Shutdown()
-		c.log.Info("Crawler: publisher shutdown complete")
-	}
 }

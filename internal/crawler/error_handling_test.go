@@ -2,28 +2,14 @@ package crawler
 
 import (
 	"context"
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
-	"abp-bot-tiktok/internal/models"
-	"abp-bot-tiktok/pkg/api"
 	"abp-bot-tiktok/pkg/config"
 
 	"go.uber.org/zap"
 )
-
-// newTestPublisher returns a Publisher with minimal dependencies for unit tests.
-func newTestPublisher(t *testing.T, srvURL string) *Publisher {
-	t.Helper()
-	var apiClient api.APIClient
-	if srvURL != "" {
-		apiClient = api.NewClient(srvURL, 10*time.Second, zap.NewNop())
-	}
-	return NewPublisher(apiClient, zap.NewNop())
-}
 
 func TestContainsAny_EmptyString(t *testing.T) {
 	// containsAny should return false for an empty string, regardless of subs.
@@ -79,7 +65,6 @@ func TestFormatErrorWrapping(t *testing.T) {
 		{"Browser context missing", "connectGPM: no browser context from GPM", "connectGPM"},
 		{"Page create fail", "createPageWithRetry: browser closed", "createPageWithRetry"},
 		{"Page create max retries", "createPageWithRetry: failed after 3 attempts", "createPageWithRetry"},
-		{"Push to API fail", "pushToAPI:", "pushToAPI"},
 	}
 
 	for _, tt := range tests {
@@ -91,92 +76,12 @@ func TestFormatErrorWrapping(t *testing.T) {
 	}
 }
 
-func TestPushToAPI_Success(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer srv.Close()
-
-	p := newTestPublisher(t, srv.URL)
-
-	videos := []models.VideoItem{
-		{VideoID: "v1", Keyword: "kw", OrgID: 1, UniqueID: "u1", AuthID: "a1", AuthName: "User"},
-	}
-	ctx := context.Background()
-	err := p.PushToAPI(ctx, videos)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestPushToAPI_EmptyVideos(t *testing.T) {
-	p := newTestPublisher(t, "http://example.com")
-
-	ctx := context.Background()
-	err := p.PushToAPI(ctx, nil)
-	if err != nil {
-		t.Fatalf("unexpected error for nil videos: %v", err)
-	}
-	err = p.PushToAPI(ctx, []models.VideoItem{})
-	if err != nil {
-		t.Fatalf("unexpected error for empty videos: %v", err)
-	}
-}
-
-func TestPushToAPI_ServerError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-	}))
-	defer srv.Close()
-
-	p := newTestPublisher(t, srv.URL)
-
-	videos := []models.VideoItem{
-		{VideoID: "v1", Keyword: "kw", OrgID: 1, UniqueID: "u1", AuthID: "a1", AuthName: "User"},
-	}
-	ctx := context.Background()
-	err := p.PushToAPI(ctx, videos)
-	if err == nil {
-		t.Fatal("expected error for server error, got nil")
-	}
-	if !strings.Contains(err.Error(), "pushToAPI") {
-		t.Errorf("error should contain 'pushToAPI', got: %v", err)
-	}
-}
-
-func TestPushToAPI_ContextCancelled(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(200 * time.Millisecond)
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer srv.Close()
-
-	p := newTestPublisher(t, srv.URL)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	videos := []models.VideoItem{
-		{VideoID: "v1", Keyword: "kw", OrgID: 1, UniqueID: "u1", AuthID: "a1", AuthName: "User"},
-	}
-	err := p.PushToAPI(ctx, videos)
-	if err == nil {
-		t.Fatal("expected error for cancelled context, got nil")
-	}
-}
-
-func TestNew_CreatesAPIClient(t *testing.T) {
-	cfg := &config.Config{
-		APIURL:             "http://example.com",
-		HTTPTimeoutSeconds: 30,
-	}
+func TestNew_CreatesCrawler(t *testing.T) {
+	cfg := &config.Config{}
 	log := zap.NewNop()
-	c := New(cfg, log, nil)
+	c := New(cfg, log, nil, nil)
 	if c == nil {
 		t.Fatal("New returned nil")
-	}
-	if c.apiClient == nil {
-		t.Error("apiClient should be created when APIURL is set")
 	}
 	if c.gpmSvc == nil {
 		t.Error("gpmSvc should be created")
@@ -184,28 +89,11 @@ func TestNew_CreatesAPIClient(t *testing.T) {
 	if c.scraper == nil {
 		t.Error("scraper should be created")
 	}
-	if c.publisher == nil {
-		t.Error("publisher should be created")
-	}
 	if c.visitor == nil {
 		t.Error("visitor should be created")
 	}
 	if c.visitor.cfg != cfg {
 		t.Error("visitor should use the same config")
-	}
-}
-
-func TestNew_NoAPIClientWhenEmptyURL(t *testing.T) {
-	cfg := &config.Config{
-		APIURL: "",
-	}
-	log := zap.NewNop()
-	c := New(cfg, log, nil)
-	if c.apiClient != nil {
-		t.Error("apiClient should be nil when APIURL is empty")
-	}
-	if c.visitor == nil {
-		t.Error("visitor should still be created even when API client is nil")
 	}
 }
 

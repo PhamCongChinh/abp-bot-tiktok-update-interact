@@ -15,7 +15,7 @@ func TestNewURLVisitor(t *testing.T) {
 	gpmSvc := NewDefaultGPMService()
 	scrpr := NewScraper()
 
-	v := NewURLVisitor(cfg, gpmSvc, scrpr)
+	v := NewURLVisitor(cfg, gpmSvc, scrpr, nil)
 
 	if v == nil {
 		t.Fatal("NewURLVisitor returned nil")
@@ -39,7 +39,7 @@ func TestCrawlURLs_ContextCancelled(t *testing.T) {
 	gpmSvc := NewDefaultGPMService()
 	scrpr := NewScraper()
 
-	v := NewURLVisitor(cfg, gpmSvc, scrpr)
+	v := NewURLVisitor(cfg, gpmSvc, scrpr, nil)
 
 	// When context is already cancelled, CrawlURLs should return immediately
 	// without making any GPM connections or page interactions.
@@ -63,7 +63,7 @@ func TestCrawlURLs_EmptyURLs(t *testing.T) {
 	gpmSvc := NewDefaultGPMService()
 	scrpr := NewScraper()
 
-	v := NewURLVisitor(cfg, gpmSvc, scrpr)
+	v := NewURLVisitor(cfg, gpmSvc, scrpr, nil)
 
 	ctx := context.Background()
 	start := time.Now()
@@ -94,7 +94,7 @@ func TestCrawlURLs_MaxPagesGuard(t *testing.T) {
 	gpmSvc := NewDefaultGPMService()
 	scrpr := NewScraper()
 
-	v := NewURLVisitor(cfg, gpmSvc, scrpr)
+	v := NewURLVisitor(cfg, gpmSvc, scrpr, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"abp-bot-tiktok/internal/models"
+	"abp-bot-tiktok/internal/repository"
 	"abp-bot-tiktok/internal/utils"
 	"abp-bot-tiktok/pkg/config"
 	"abp-bot-tiktok/pkg/gpm"
@@ -22,17 +23,20 @@ import (
 // replaces the old keyword-search crawl (see git history for Searcher) with a
 // re-visit flow driven by URLs already known to the backend (tbl_posts).
 type URLVisitor struct {
-	cfg     *config.Config
-	gpmSvc  *GPMService
-	scraper *Scraper
+	cfg      *config.Config
+	gpmSvc   *GPMService
+	scraper  *Scraper
+	postRepo repository.PostStore
 }
 
-// NewURLVisitor creates a URLVisitor wired with its dependencies.
-func NewURLVisitor(cfg *config.Config, gpmSvc *GPMService, scraper *Scraper) *URLVisitor {
+// NewURLVisitor creates a URLVisitor wired with its dependencies. postRepo
+// may be nil — when nil, scraped stats are not written back to tbl_posts.
+func NewURLVisitor(cfg *config.Config, gpmSvc *GPMService, scraper *Scraper, postRepo repository.PostStore) *URLVisitor {
 	return &URLVisitor{
-		cfg:     cfg,
-		gpmSvc:  gpmSvc,
-		scraper: scraper,
+		cfg:      cfg,
+		gpmSvc:   gpmSvc,
+		scraper:  scraper,
+		postRepo: postRepo,
 	}
 }
 
@@ -260,7 +264,28 @@ func (v *URLVisitor) VisitURL(ctx context.Context, page playwright.Page, videoUR
 		)
 	}
 
-	return parseItemStruct(v.cfg.OrgID, item), true
+	video := parseItemStruct(v.cfg.OrgID, item)
+
+	if v.postRepo != nil {
+		rowsAffected, err := v.postRepo.UpdateStatsByURL(ctx, videoURL, video.Comments, video.Shares, video.Reactions, video.Favors, video.Views)
+		if err != nil {
+			log.Sugar().Warnf("%s %s -> failed to update tbl_posts stats: %v", tag, videoURL, err)
+		} else {
+			log.Info("tbl_posts stats updated",
+				zap.String("tag", tag),
+				zap.String("url", videoURL),
+				zap.String("video_id", video.VideoID),
+				zap.Int64("rows_affected", rowsAffected),
+				zap.Int64("comments", video.Comments),
+				zap.Int64("shares", video.Shares),
+				zap.Int64("reactions", video.Reactions),
+				zap.Int64("favors", video.Favors),
+				zap.Int64("views", video.Views),
+			)
+		}
+	}
+
+	return video, true
 }
 
 // extractFromRehydrationScript reads TikTok's embedded page-hydration JSON

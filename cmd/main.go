@@ -92,11 +92,16 @@ func main() {
 		return
 	}
 
+	// TEST MODE: chỉ crawl URL đầu tiên để kiểm tra update tbl_posts có chạy
+	// đúng không. Xoá đoạn này khi muốn crawl lại toàn bộ danh sách.
+	postURLs = postURLs[:1]
+	log.Warn("TEST MODE: chỉ crawl URL đầu tiên", zap.String("url", postURLs[0]))
+
 	// Set URLs to config (will be reused for all crawl cycles, shuffled each cycle in Run())
 	cfg.PostURLs = postURLs
 
 	// Init crawler
-	c := crawler.New(&cfg, log, nil)
+	c := crawler.New(&cfg, log, nil, postRepo)
 
 	log.Info("Crawler initialized - will visit tbl_posts URLs every 1-1.5 hours")
 

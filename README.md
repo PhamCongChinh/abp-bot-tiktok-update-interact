@@ -8,14 +8,13 @@ Bot viết bằng Go với Playwright, dùng GPM (GoLogin Profile Manager) để
 ├── cmd/
 │   └── main.go           # Entry point chính
 ├── internal/
-│   ├── crawler/          # Orchestrator + GPM circuit breaker, scraper, visitor (visit URL), publisher
+│   ├── crawler/          # Orchestrator + GPM circuit breaker, scraper, visitor (visit URL)
 │   ├── models/           # Data models (VideoItem)
-│   ├── parser/           # Convert VideoItem -> payload gửi API (TiktokPost)
+│   ├── parser/           # Convert VideoItem -> TiktokPost
 │   ├── repository/       # Truy vấn PostgreSQL (tbl_posts, keyword/bot_config — xem ghi chú bên dưới)
 │   ├── scheduler/        # Vòng lặp crawl định kỳ (random interval)
 │   └── utils/            # Utilities (scroll, delay, retry, resource monitor)
 ├── pkg/
-│   ├── api/               # HTTP client đẩy dữ liệu lên backend (hiện chưa được gọi — xem "Đẩy dữ liệu ra ngoài")
 │   ├── config/            # Config loader (.env)
 │   ├── database/          # PostgreSQL client
 │   ├── gpm/                # HTTP client điều khiển GoLogin Profile Manager
@@ -77,9 +76,6 @@ PUB_TIME=1785517201
 # GPM — danh sách nhiều profile, phân tách dấu phẩy. Để trống = bot không crawl được gì.
 # PROFILE_IDS=profile-1,profile-2
 
-# Backend API nhận dữ liệu crawl (hiện chưa được gọi — xem mục "Đẩy dữ liệu ra ngoài")
-# API_URL=http://localhost:8080/api
-
 # Thư mục chứa log
 # OUTPUT_DIR=./data
 
@@ -95,9 +91,6 @@ PUB_TIME=1785517201
 # PostgreSQL pool
 # POSTGRES_MAX_POOL_SIZE=100
 # POSTGRES_MIN_POOL_SIZE=10
-
-# HTTP client gọi API_URL
-# HTTP_TIMEOUT_SECONDS=30
 
 # Nghỉ giữa các URL trong cùng 1 batch (giây)
 # SLEEP_MIN_KEYWORD=60
@@ -179,34 +172,15 @@ Nếu lỗi → mở GPM trước khi chạy bot.
 
 ## Đẩy dữ liệu ra ngoài
 
-**Hiện tại bot chỉ log dữ liệu scrape được, chưa đẩy đi đâu.** Mỗi video visit thành công được log ở mức Info với đầy đủ `video_id/views/comments/shares/reactions/favors/author` (xem `internal/crawler/visitor.go`).
+Mỗi video visit thành công được log ở mức Info với đầy đủ `video_id/views/comments/shares/reactions/favors/author` (xem `internal/crawler/visitor.go`), sau đó số liệu (`comments/shares/reactions/favors/views`) được ghi thẳng vào `tbl_posts` theo `url` đang crawl:
 
-Hạ tầng đẩy batch lên backend (`internal/crawler/publisher.go`, `pkg/api/client.go`) vẫn còn nguyên — 3 worker gom tối đa 10 video hoặc mỗi 5 giây rồi `POST` tới:
-
-```
-POST {API_URL}/api/v1/posts/insert-unclassified-org-posts
-Content-Type: application/json
-
-{
-  "index": "not_classify_org_posts",
-  "upsert": true,
-  "data": [
-    {
-      "org_id": 2,
-      "subject_id": "7123456789",
-      "url": "https://www.tiktok.com/@username/video/7123456789",
-      "comments": 100,
-      "shares": 50,
-      "reactions": 1000,
-      "favors": 200,
-      "views": 10000,
-      "...": "xem đầy đủ field ở internal/parser/tiktok_post.go"
-    }
-  ]
-}
+```sql
+UPDATE tbl_posts tp
+   SET comments = $1, shares = $2, reactions = $3, favors = $4, views = $5
+ WHERE tp.url = $6
 ```
 
-Nhưng luồng visit-URL hiện tại **chưa gọi tới** `Publisher.PushBatch` — cần nối thêm khi có yêu cầu cập nhật số liệu về backend.
+Xem `internal/repository/post_repo.go` (`PostRepository.UpdateStatsByURL`). Nếu không có post nào khớp `url`, bot chỉ log warning chứ không lỗi crawl.
 
 ## Tính năng
 

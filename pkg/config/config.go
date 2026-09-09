@@ -33,10 +33,6 @@ type Config struct {
 	OrgID        int
 	PubTimeAfter int64
 
-	// API
-	APIURL             string
-	HTTPTimeoutSeconds int
-
 	// GPM (GoLogin Profile Manager)
 	GPMAPI     string
 	ProfileIDs []string
@@ -83,7 +79,6 @@ func Load() (Config, error) {
 	loadLogSettings(&cfg, &errs)
 	loadPostgresSettings(&cfg, &errs)
 	loadPostLookupSettings(&cfg, &errs)
-	loadAPISettings(&cfg, &errs)
 	loadGpmSettings(&cfg, &errs)
 	loadCrawlSettings(&cfg, &errs)
 	validateBounds(&cfg, &errs)
@@ -218,12 +213,6 @@ func loadPostgresSettings(cfg *Config, errs *[]string) {
 func loadPostLookupSettings(cfg *Config, errs *[]string) {
 	cfg.OrgID = requireInt(errs, "ORG_ID")
 	cfg.PubTimeAfter = requireInt64(errs, "PUB_TIME")
-}
-
-// loadAPISettings populates API client configuration fields.
-func loadAPISettings(cfg *Config, errs *[]string) {
-	cfg.APIURL = optStr(errs, "API_URL", "")
-	cfg.HTTPTimeoutSeconds = optInt(errs, "HTTP_TIMEOUT_SECONDS", 30)
 }
 
 // loadGpmSettings populates GPM (GoLogin Profile Manager) configuration fields.
